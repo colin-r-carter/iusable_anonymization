@@ -196,9 +196,9 @@
             <div class="flex-1 flex flex-col">
                 <!-- Headers -->
                 <div class="flex border-b">
-                    <div class="w-1/2 p-4">
+                    <div class="w-1/2 p-4 text-right">
                         <div class="flex justify-between items-center mb-2">
-                            <h2 class="text-lg font-semibold text-base-content">Input Text</h2>
+                            <h2 class="text-lg font-semibold text-base-content">Input Text <small>({{ text?.length }})</small></h2>
                             <button 
                                 @click="triggerFileInput"
                                 :disabled="fileProcessing"
@@ -220,9 +220,10 @@
                         <div v-if="fileError" class="mb-2 text-sm text-error bg-error border border-error rounded p-2">
                             {{ fileError }}
                         </div>
-                        <p class="text-sm text-base-content/50">
+                        <p class="text-sm text-base-content/50 text-left">
                             {{ mode === 'anonymize' ? 'Type/paste text or drag files here. Use button above for file selection.' : 'Enter anonymized text with placeholders like [1_person]' }}
                         </p>
+                        <button @click="clearText" class="btn btn-ghost btn-xs text-error">Clear Text</button>
                     </div>
                     <div class="w-1/2 p-4 border-l border-base-300 flex justify-between items-center">
                         <div>
@@ -474,6 +475,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 import modelCache from '../utils/modelCache.js';
 
+import * as pdfjsWorker from '../assets/pdf.worker.min.mjs';
+
 // Heroicons imports
 import { 
     ArrowPathIcon, 
@@ -598,6 +601,9 @@ export default {
     mounted() {
         // Initialize Gliner on mount
         // this.initGliner();
+
+        // Set the worker source path
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '../assets/pdf.worker.min.mjs';
     },
     computed: {
         anonymizedText() {
@@ -612,7 +618,7 @@ export default {
                 names.forEach(name => {
                     if (!name) return; // Skip empty strings
                     // Escape regex special characters in name
-                    let escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    let escapedName = name.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
                     let fuzzyName = escapedName.split('').join('[\\s-]*');
                     // Additional escape for the fuzzy pattern to handle any remaining special chars
                     fuzzyName = fuzzyName.replace(/\+/g, '\\+');
@@ -673,6 +679,24 @@ export default {
                 this.downloadProgress = 85;
                 this.downloadStatus = 'Loading tokenizer...';
                 
+                // Improved backend detection and fallback
+                let executionProviders = ['wasm']; // Start with basic WASM as most compatible
+                
+                // Check for WebGPU support with proper validation
+                if ('gpu' in navigator) {
+                    try {
+                        // Add webgpu as preferred if available
+                        executionProviders.unshift('webgpu');
+                        console.log('WebGPU detected, will attempt webgpu backend with wasm fallback');
+                    } catch (e) {
+                        console.log('WebGPU API present but not functional, using wasm only');
+                    }
+                } else {
+                    console.log('WebGPU not available, using wasm backend');
+                }
+                
+                console.log(`Using execution providers: ${executionProviders.join(', ')}`);
+                
                 const newGliner = new Gliner({
                     tokenizerPath: "./gliner_multi_pii-v1",
                     onnxSettings: {
@@ -681,6 +705,13 @@ export default {
                             cpu: "./models/gliner_multi_pii-v1/onnx/cpu.wasm",
                             gpu: "./models/gliner_multi_pii-v1/onnx/gpu.wasm",
                         },
+                        executionProviders: executionProviders,
+                        // Add additional ONNX runtime options for better compatibility
+                        sessionOptions: {
+                            enableCpuMemArena: false,
+                            enableMemPattern: false,
+                            graphOptimizationLevel: 'basic'
+                        }
                     },
                     transformersSettings: {
                         useBrowserCache: true,
@@ -719,11 +750,17 @@ export default {
             } catch (error) {
                 console.error('Failed to initialize Gliner:', error);
                 
-                // Handle specific memory errors
-                if (error.message && (error.message.includes('out of memory') || error.message.includes('ERR_OUT_OF_MEMORY'))) {
+                // Handle specific backend and memory errors
+                if (error.message && error.message.includes('no available backend found')) {
+                    this.initError = 'No compatible backend found. Please ensure your browser supports WebAssembly or try a different browser.';
+                } else if (error.message && error.message.includes('WebGPU is not supported')) {
+                    this.initError = 'WebGPU not supported. Falling back to WebAssembly backend. Please refresh the page.';
+                } else if (error.message && (error.message.includes('out of memory') || error.message.includes('ERR_OUT_OF_MEMORY'))) {
                     this.initError = 'Not enough memory to load this model. Try closing other browser tabs or use a smaller model.';
                 } else if (error.message && error.message.includes('Failed to fetch')) {
                     this.initError = 'Failed to load the model. This may be due to memory constraints or network issues.';
+                } else if (error.message && (error.message.includes('backend') || error.message.includes('execution provider'))) {
+                    this.initError = 'Backend initialization failed. Your browser may not support the required features. Try refreshing or using a different browser.';
                 } else {
                     this.initError = 'Failed to initialize the Anonymization model. Please check the console for details.';
                 }
@@ -786,22 +823,39 @@ export default {
                     if (!this.gliner) {
                         console.error('Model failed to initialize');
                     } else {
-                        // Use Gliner.inference for entity detection with selected labels only
-                        const results = await this.gliner.inference({
-                            texts: [this.text],
-                            entities: this.selectedLabels,
-                            threshold: 0.1,
-                        });
+                        const MAX_CHUNK_LENGTH = 12000; // Change if needed, tested on MacBook Pro M4, Chromium Engine Version 137.0.7151.56 
 
-                        // results is an array of arrays - get the first text's results
-                        const aiEntities = results[0].map((ent) => ({
-                            id: entityId++,
-                            name: ent.spanText,
-                            type: ent.label,
-                            source: 'ai'
-                        }));
-                        
-                        allEntities.push(...aiEntities);
+                        // Function to split text into chunks of a maximum length
+                        function splitTextIntoChunks(text, maxLength) {
+                            const chunks = [];
+                            for (let i = 0; i < text.length; i += maxLength) {
+                                chunks.push(text.substring(i, i + maxLength));
+                            }
+                            return chunks;
+                        }
+
+                        // Use Gliner.inference for entity detection with selected labels only
+                        const textChunks = splitTextIntoChunks(this.text, MAX_CHUNK_LENGTH);
+                        let entityId = 0;
+
+                        for (const chunk of textChunks) {
+                            console.log("Running chunk through GLiNER Inference...")
+                            const results = await this.gliner.inference({
+                                texts: [chunk],
+                                entities: this.selectedLabels,
+                                threshold: 0.1,
+                            });
+
+                            // results is an array of arrays - get the first text's results
+                            const aiEntities = results[0].map((ent) => ({
+                                id: entityId++,
+                                name: ent.spanText,
+                                type: ent.label,
+                                source: 'ai'
+                            }));
+                            
+                            allEntities.push(...aiEntities);
+                        }
                     }
                 }
                 
@@ -894,6 +948,9 @@ export default {
         },
         clearEntities() {
             this.entities = [];
+        },
+        clearText(){
+            this.text = '';
         },
         triggerFileInput() {
             if (!this.fileProcessing) {

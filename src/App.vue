@@ -236,7 +236,7 @@ const closePrivacyModal = () => {
             </div>
             
             <p class="text-center text-sm text-base-content/60 mt-4">
-                <span class="font-medium">Open Source:</span> You can also access the <a href="https://github.com/colin-r-carter/iusable-anonymization" class="link link-primary">source code</a> and run this application locally on your own computer.
+                <span class="font-medium">Open Source:</span> You can also access the <a href="https://github.com/colin-r-carter/iusable_anonymization" class="link link-primary">source code</a> and run this application locally on your own computer.
             </p>
         </div>
     </div>
