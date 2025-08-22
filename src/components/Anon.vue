@@ -475,7 +475,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 import modelCache from '../utils/modelCache.js';
 
-import * as pdfjsWorker from '../assets/pdf.worker.min.mjs';
+// import * as pdfjsWorker from '../assets/pdf.worker.min.mjs';
 
 // Heroicons imports
 import { 
