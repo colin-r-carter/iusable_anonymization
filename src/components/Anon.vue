@@ -612,21 +612,44 @@ export default {
             }
             
             let anonymized = this.text;
+
+            // For each entity, first replace the full multi-word span with a single placeholder (id_type)
+            // Then, replace remaining partial word occurrences with suffixed placeholders (id_type_a, id_type_b, ...)
             this.entities.forEach(entity => {
                 if (!entity.name) return; // Skip if name is undefined/null/empty
-                let names = entity.name.split(/\s+|-/);
-                names.forEach(name => {
-                    if (!name) return; // Skip empty strings
-                    // Escape regex special characters in name
-                    let escapedName = name.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
-                    let fuzzyName = escapedName.split('').join('[\\s-]*');
-                    // Additional escape for the fuzzy pattern to handle any remaining special chars
-                    fuzzyName = fuzzyName.replace(/\+/g, '\\+');
-                    // Use \b only at the start and end
-                    let regex = new RegExp(`\\b${fuzzyName}\\b`, 'gi');
-                    anonymized = anonymized.replace(regex, `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`);
+
+                // Split entity name into words by whitespace or hyphen
+                const words = entity.name.split(/\s+|-/).filter(w => w && w.trim().length > 0);
+                const basePlaceholder = `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`;
+
+                // Helper to escape regex special chars for whole-word matching
+                const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const letters = 'abcdefghijklmnopqrstuvwxyz';
+
+                if (words.length > 1) {
+                    // Build a full name regex: \bword1[\s-]+word2[\s-]+...\b to match the entire span
+                    const fullJoined = words.map(w => escapeRegex(w)).join('[\\s-]+');
+                    const fullPattern = new RegExp(`\\b${fullJoined}\\b`, 'gi');
+                    // Replace full multi-word span with a sequence of suffixed placeholders (e.g., 1_person_a 1_person_b)
+                    const sequence = words
+                        .map((_, idx) => `<span class=\"badge badge-outline\">${entity.id}_${entity.type}_${letters[idx] || String(idx + 1)}</span>`)
+                        .join(' ');
+                    anonymized = anonymized.replace(fullPattern, sequence);
+                } else if (words.length === 1) {
+                    // Single-word entity: just replace the word with base placeholder
+                    const singleWordPattern = new RegExp(`\\b${escapeRegex(words[0])}\\b`, 'gi');
+                    anonymized = anonymized.replace(singleWordPattern, basePlaceholder);
+                }
+
+                // Now handle partial occurrences: replace remaining standalone words with suffixed placeholders
+                words.forEach((w, idx) => {
+                    const suffix = letters[idx] || String(idx + 1); // fallback to numbers if more than 26
+                    const suffixedPlaceholder = `<span class=\"badge badge-outline\">${entity.id}_${entity.type}_${suffix}</span>`;
+                    const wordPattern = new RegExp(`\\b${escapeRegex(w)}\\b`, 'gi');
+                    anonymized = anonymized.replace(wordPattern, suffixedPlaceholder);
                 });
             });
+
             return anonymized;
         }
     },
@@ -910,39 +933,67 @@ export default {
         pseudonymizedText() {
             let pseudonymized = this.text;
             
-            // Replace placeholders with entity values
+            // Replace placeholders with entity values, supporting suffixed parts (_a, _b, ...)
             this.entities.forEach(entity => {
                 if (!entity.name) return; // Skip if replacement value is empty
-                
-                // Match patterns like [1_person] or <span class="badge badge-outline">1_person</span>
-                const placeholderPattern = new RegExp(`\\[${entity.id}_${entity.type}\\]`, 'g');
-                const badgePattern = new RegExp(`<span class="badge badge-outline">${entity.id}_${entity.type}</span>`, 'g');
-                
-                pseudonymized = pseudonymized.replace(placeholderPattern, entity.name);
-                pseudonymized = pseudonymized.replace(badgePattern, entity.name);
+
+                const words = entity.name.split(/\s+|-/).filter(w => w && w.trim().length > 0);
+                const letters = 'abcdefghijklmnopqrstuvwxyz';
+
+                // 1) Replace suffixed placeholders first (e.g., 1_person_a) with corresponding word
+                words.forEach((w, idx) => {
+                    const suffix = letters[idx] || String(idx + 1);
+                    const bracketSuffixed = new RegExp(`\\[${entity.id}_${entity.type}_${suffix}\\]`, 'g');
+                    const badgeSuffixed = new RegExp(`<span class=\\"badge badge-outline\\">${entity.id}_${entity.type}_${suffix}</span>`, 'g');
+                    pseudonymized = pseudonymized.replace(bracketSuffixed, w);
+                    pseudonymized = pseudonymized.replace(badgeSuffixed, w);
+                });
+
+                // 2) Now replace base placeholders (e.g., 1_person) with the full entity name
+                const bracketBase = new RegExp(`\\[${entity.id}_${entity.type}\\]`, 'g');
+                const badgeBase = new RegExp(`<span class=\\"badge badge-outline\\">${entity.id}_${entity.type}</span>`, 'g');
+                pseudonymized = pseudonymized.replace(bracketBase, entity.name);
+                pseudonymized = pseudonymized.replace(badgeBase, entity.name);
+
+                // 3) Optional: If we encounter sequences of base placeholders that don't match word count,
+                //    try to replace them with corresponding parts. This is a conservative fallback.
+                //    Example: [1_person][1_person] should become "Hans Müller" if entity has two words.
+                if (words.length > 1) {
+                    const seq = Array(words.length).fill(`<span class=\\"badge badge-outline\\">${entity.id}_${entity.type}</span>`).join('');
+                    const seqRegex = new RegExp(seq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    pseudonymized = pseudonymized.replace(seqRegex, entity.name);
+                    const bracketSeq = Array(words.length).fill(`[${entity.id}_${entity.type}]`).join('');
+                    const bracketSeqRegex = new RegExp(bracketSeq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    pseudonymized = pseudonymized.replace(bracketSeqRegex, entity.name);
+                }
             });
             
             return pseudonymized;
         },
         detectPlaceholders() {
-            // Find all placeholders in the text using regex pattern [number_type]
+            // Find all placeholders in the text using regex pattern [number_type] and normalize optional suffixes (_a, _b, ...)
             const placeholderRegex = /\[(\d+)_([^\]]+)\]/g;
-            const foundPlaceholders = new Set();
+            const foundPlaceholders = new Map(); // id_typeBase -> Set of suffixes seen
             let match;
             
             while ((match = placeholderRegex.exec(this.text)) !== null) {
                 const id = parseInt(match[1]);
-                const type = match[2];
-                foundPlaceholders.add(`${id}_${type}`);
+                const rawType = match[2];
+                const suffixMatch = rawType.match(/^(.*?)(?:_([a-z]))?$/i);
+                const typeBase = suffixMatch ? suffixMatch[1] : rawType;
+                const suffix = suffixMatch && suffixMatch[2] ? suffixMatch[2].toLowerCase() : null;
+                const key = `${id}_${typeBase}`;
+                if (!foundPlaceholders.has(key)) foundPlaceholders.set(key, new Set());
+                if (suffix) foundPlaceholders.get(key).add(suffix);
             }
             
-            // Clear existing entities and create new ones from placeholders
-            this.entities = Array.from(foundPlaceholders).map(placeholder => {
-                const [id, type] = placeholder.split('_');
+            // Clear existing entities and create new ones from placeholders (base types only)
+            this.entities = Array.from(foundPlaceholders.keys()).map(key => {
+                const [idStr, typeBase] = key.split('_');
                 return {
-                    id: parseInt(id),
+                    id: parseInt(idStr),
                     name: '', // Empty name for user to fill in
-                    type: type
+                    type: typeBase
                 };
             }).sort((a, b) => a.id - b.id);
         },
