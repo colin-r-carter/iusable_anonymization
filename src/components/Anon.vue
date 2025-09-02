@@ -313,8 +313,13 @@
                             Common Only
                         </button>
                     </div>
-                </div>
-                
+                    <!-- Define own Labels -->
+                     <div class="mt-4">
+                         <h4 class="text-md font-semibold text-base-content mb-2">Define Own Labels</h4>
+                         <input v-model="customLabelName" class="input input-bordered input-sm w-full" placeholder="Custom Label Name">
+                         <button @click="addCustomLabel" class="btn btn-sm btn-outline mt-2">Add Custom Label</button>
+                     </div>
+                    </div>
                 <div class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto border border-base-300 rounded p-3">
                     <label v-for="label in availableLabels" :key="label" class="flex items-center space-x-2 hover:bg-base-200 p-1 rounded">
                         <input 
@@ -516,6 +521,7 @@ export default {
             entities: [],
             mode: 'anonymize', // 'anonymize' or 'pseudonymize'
             selectedModel: 'quantized', // 'quantized' or 'full'
+            customLabelName: '',
             availableLabels: [
                 "location",
                 "street",
@@ -1062,6 +1068,13 @@ export default {
             const arrayBuffer = await file.arrayBuffer();
             const result = await mammoth.extractRawText({ arrayBuffer });
             return result.value;
+        },
+        addCustomLabel(){
+            if(this.customLabelName.trim() === ''){
+                return;
+            }
+            this.availableLabels.push(this.customLabelName.trim());
+            this.customLabelName = '';
         },
         formatLabel(label) {
             return label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
