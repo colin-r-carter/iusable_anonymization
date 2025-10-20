@@ -11,7 +11,7 @@
   "dependencies": {
     "@heroicons/vue": "^2.1.5",
     "gliner": "^0.0.19",
-    "mammoth": "^1.9.0",
+    "mammoth": "^1.11.0",
     "onnxruntime-web": "^1.22.0",
     "pdfjs-dist": "^5.2.133",
     "vue": "^3.4.21"
