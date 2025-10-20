@@ -296,7 +296,13 @@
                         <XMarkIcon class="w-5 h-5" />
                     </button>
                 </div>
-                
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-base-content mb-2">
+                        Confidence Threshold: <span class="font-bold">{{ (threshold * 100).toFixed(0) }}%</span>
+                    </label>
+                    <input type="range" min="0" max="1" step="0.01" v-model="threshold" class="range range-sm" />
+                </div>
                 <div class="mb-4">
                     <p class="text-sm text-base-content/60 mb-3">
                         Select which types of entities should be detected and anonymized. {{ selectedLabels.length }} of {{ availableLabels.length }} labels selected.
@@ -319,7 +325,7 @@
                          <input v-model="customLabelName" class="input input-bordered input-sm w-full" placeholder="Custom Label Name">
                          <button @click="addCustomLabel" class="btn btn-sm btn-outline mt-2">Add Custom Label</button>
                      </div>
-                    </div>
+                </div>
                 <div class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto border border-base-300 rounded p-3">
                     <label v-for="label in availableLabels" :key="label" class="flex items-center space-x-2 hover:bg-base-200 p-1 rounded">
                         <input 
@@ -601,7 +607,8 @@ export default {
             // Cache management
             cacheStats: null,
             refreshingCache: false,
-            clearingCache: false
+            clearingCache: false,
+            threshold: 0.1, // Default confidence threshold
         }
     },
     mounted() {
@@ -849,7 +856,7 @@ export default {
                             const results = await this.gliner.inference({
                                 texts: [chunk],
                                 entities: this.selectedLabels,
-                                threshold: 0.1,
+                                threshold: this.threshold || 0.1,
                             });
 
                             // results is an array of arrays - get the first text's results
