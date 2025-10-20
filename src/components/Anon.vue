@@ -625,20 +625,17 @@ export default {
             }
             
             let anonymized = this.text;
-            this.entities.forEach(entity => {
+            // Sort entities by name length (descending) to replace longer entities first
+            const sortedEntities = [...this.entities].sort((a, b) => (b.name || '').length - (a.name || '').length);
+            
+            sortedEntities.forEach(entity => {
                 if (!entity.name) return; // Skip if name is undefined/null/empty
-                let names = entity.name.split(/\s+|-/);
-                names.forEach(name => {
-                    if (!name) return; // Skip empty strings
-                    // Escape regex special characters in name
-                    let escapedName = name.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
-                    let fuzzyName = escapedName.split('').join('[\\s-]*');
-                    // Additional escape for the fuzzy pattern to handle any remaining special chars
-                    fuzzyName = fuzzyName.replace(/\+/g, '\\+');
-                    // Use \b only at the start and end
-                    let regex = new RegExp(`\\b${fuzzyName}\\b`, 'gi');
-                    anonymized = anonymized.replace(regex, `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`);
-                });
+                
+                // Escape regex special characters in name
+                let escapedName = entity.name.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
+                // Use word boundaries to match whole words/phrases
+                let regex = new RegExp(`\\b${escapedName}\\b`, 'gi');
+                anonymized = anonymized.replace(regex, `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`);
             });
             return anonymized;
         }
