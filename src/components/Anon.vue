@@ -643,6 +643,7 @@ export default {
             if (this.splitEntities) {
                 const letters = 'abcdefghijklmnopqrstuvwxyz';
                 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const escapeAttr = (s = '') => s.replace(/"/g, '&quot;');
 
                 sortedEntities.forEach(entity => {
                     if (!entity.name) return; // Skip if name is undefined/null/empty
@@ -650,20 +651,20 @@ export default {
 
                     if (words.length > 1) {
                         const fullJoined = words.map(w => escapeRegex(w)).join('[\\s-]+');
-                        const fullPattern = new RegExp(`\\b${fullJoined}\\b`, 'gi');
+                        const fullPattern = new RegExp(`\\b${fullJoined}\\b(?![^<]*>)`, 'gi');
                         const sequence = words
-                            .map((_, idx) => `<span class="badge badge-outline">${entity.id}_${entity.type}_${letters[idx] || String(idx + 1)}</span>`)
+                            .map((w, idx) => `<span class="badge badge-outline tooltip cursor-pointer" data-tip="${escapeAttr(w)}">${entity.id}_${entity.type}_${letters[idx] || String(idx + 1)}</span>`)
                             .join(' ');
                         anonymized = anonymized.replace(fullPattern, sequence);
                     } else if (words.length === 1) {
-                        const singleWordPattern = new RegExp(`\\b${escapeRegex(words[0])}\\b`, 'gi');
-                        anonymized = anonymized.replace(singleWordPattern, `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`);
+                        const singleWordPattern = new RegExp(`\\b${escapeRegex(words[0])}\\b(?![^<]*>)`, 'gi');
+                        anonymized = anonymized.replace(singleWordPattern, `<span class="badge badge-outline tooltip cursor-pointer" data-tip="${escapeAttr(entity.name)}">${entity.id}_${entity.type}</span>`);
                     }
 
                     words.forEach((w, idx) => {
                         const suffix = letters[idx] || String(idx + 1);
-                        const wordPattern = new RegExp(`\\b${escapeRegex(w)}\\b`, 'gi');
-                        anonymized = anonymized.replace(wordPattern, `<span class="badge badge-outline">${entity.id}_${entity.type}_${suffix}</span>`);
+                        const wordPattern = new RegExp(`\\b${escapeRegex(w)}\\b(?![^<]*>)`, 'gi');
+                        anonymized = anonymized.replace(wordPattern, `<span class="badge badge-outline tooltip cursor-pointer" data-tip="${escapeAttr(w)}">${entity.id}_${entity.type}_${suffix}</span>`);
                     });
                 });
 
@@ -677,7 +678,8 @@ export default {
                 let escapedName = entity.name.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
                 // Use word boundaries to match whole words/phrases
                 let regex = new RegExp(`\\b${escapedName}\\b`, 'gi');
-                anonymized = anonymized.replace(regex, `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`);
+                const tooltip = entity.name.replace(/"/g, '&quot;');
+                anonymized = anonymized.replace(regex, `<span class="badge badge-outline tooltip" data-tip="${tooltip}">${entity.id}_${entity.type}</span>`);
             });
             return anonymized;
         }
@@ -956,13 +958,17 @@ export default {
             this.entities = this.entities.filter(e => e.id !== id);
         },
         copy() {
-            let outputText = this.anonymizedText.replaceAll('<span class="badge badge-outline">', '[').replaceAll('</span>', ']');
+            const outputText = this.stripBadgeSpans(this.anonymizedText);
             navigator.clipboard.writeText(outputText);
         },
         downloadTxt() {
             let currentTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
             let filename = prompt("Enter filename:", `anonymized_${currentTimestamp}`);
-            const outputText = this.anonymizedText.replaceAll('<span class="badge badge-outline">', '[').replaceAll('</span>', ']');
+            if (filename === null) {
+                // User cancelled the prompt
+                return;
+            }
+            const outputText = this.stripBadgeSpans(this.anonymizedText);
             const blob = new Blob([outputText], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -972,6 +978,11 @@ export default {
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
+        },
+        stripBadgeSpans(text) {
+            return text
+                .replace(/<span[^>]*class="[^"]*badge badge-outline[^"]*"[^>]*>/g, '[')
+                .replace(/<\/span>/g, ']');
         },
         pseudonymizedText() {
             let pseudonymized = this.text;
