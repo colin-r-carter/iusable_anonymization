@@ -234,9 +234,14 @@
                                 {{ mode === 'anonymize' ? 'Preview of the anonymized output' : 'Preview with placeholders replaced by real values' }}
                             </p>
                         </div>
-                        <button @click="copy" class="btn btn-success btn-sm">
-                            Copy Text
-                        </button>
+                        <div class="flex flex-col gap-2">
+                            <button @click="copy" class="btn btn-success btn-sm">
+                                Copy Text
+                            </button>
+                            <button @click="downloadTxt" class="btn btn-outline btn-sm">
+                                Download .TXT
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -302,6 +307,12 @@
                         Confidence Threshold: <span class="font-bold">{{ (threshold * 100).toFixed(0) }}%</span>
                     </label>
                     <input type="range" min="0" max="1" step="0.01" v-model="threshold" class="range range-sm" />
+                </div>
+                <div class="mb-4">
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" v-model="splitEntities" class="checkbox checkbox-sm" />
+                        <span class="text-sm font-medium text-base-content">Split Entities by Space (keep one entity)</span>
+                    </label>
                 </div>
                 <div class="mb-4">
                     <p class="text-sm text-base-content/60 mb-3">
@@ -609,6 +620,7 @@ export default {
             refreshingCache: false,
             clearingCache: false,
             threshold: 0.1, // Default confidence threshold
+            splitEntities: true
         }
     },
     mounted() {
@@ -627,7 +639,37 @@ export default {
             let anonymized = this.text;
             // Sort entities by name length (descending) to replace longer entities first
             const sortedEntities = [...this.entities].sort((a, b) => (b.name || '').length - (a.name || '').length);
-            
+
+            if (this.splitEntities) {
+                const letters = 'abcdefghijklmnopqrstuvwxyz';
+                const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                sortedEntities.forEach(entity => {
+                    if (!entity.name) return; // Skip if name is undefined/null/empty
+                    const words = entity.name.split(/\s+|-/).filter(w => w && w.trim().length > 0);
+
+                    if (words.length > 1) {
+                        const fullJoined = words.map(w => escapeRegex(w)).join('[\\s-]+');
+                        const fullPattern = new RegExp(`\\b${fullJoined}\\b`, 'gi');
+                        const sequence = words
+                            .map((_, idx) => `<span class="badge badge-outline">${entity.id}_${entity.type}_${letters[idx] || String(idx + 1)}</span>`)
+                            .join(' ');
+                        anonymized = anonymized.replace(fullPattern, sequence);
+                    } else if (words.length === 1) {
+                        const singleWordPattern = new RegExp(`\\b${escapeRegex(words[0])}\\b`, 'gi');
+                        anonymized = anonymized.replace(singleWordPattern, `<span class="badge badge-outline">${entity.id}_${entity.type}</span>`);
+                    }
+
+                    words.forEach((w, idx) => {
+                        const suffix = letters[idx] || String(idx + 1);
+                        const wordPattern = new RegExp(`\\b${escapeRegex(w)}\\b`, 'gi');
+                        anonymized = anonymized.replace(wordPattern, `<span class="badge badge-outline">${entity.id}_${entity.type}_${suffix}</span>`);
+                    });
+                });
+
+                return anonymized;
+            }
+
             sortedEntities.forEach(entity => {
                 if (!entity.name) return; // Skip if name is undefined/null/empty
                 
@@ -917,12 +959,55 @@ export default {
             let outputText = this.anonymizedText.replaceAll('<span class="badge badge-outline">', '[').replaceAll('</span>', ']');
             navigator.clipboard.writeText(outputText);
         },
+        downloadTxt() {
+            let currentTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            let filename = prompt("Enter filename:", `anonymized_${currentTimestamp}`);
+            const outputText = this.anonymizedText.replaceAll('<span class="badge badge-outline">', '[').replaceAll('</span>', ']');
+            const blob = new Blob([outputText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename + '.txt' || `anonymized_${currentTimestamp}.txt`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        },
         pseudonymizedText() {
             let pseudonymized = this.text;
             
             // Replace placeholders with entity values
             this.entities.forEach(entity => {
                 if (!entity.name) return; // Skip if replacement value is empty
+                if (this.splitEntities) {
+                    const words = entity.name.split(/\s+|-/).filter(w => w && w.trim().length > 0);
+                    const letters = 'abcdefghijklmnopqrstuvwxyz';
+
+                    words.forEach((w, idx) => {
+                        const suffix = letters[idx] || String(idx + 1);
+                        const bracketSuffixed = new RegExp(`\\[${entity.id}_${entity.type}_${suffix}\\]`, 'g');
+                        const badgeSuffixed = new RegExp(`<span class="badge badge-outline">${entity.id}_${entity.type}_${suffix}</span>`, 'g');
+                        pseudonymized = pseudonymized.replace(bracketSuffixed, w);
+                        pseudonymized = pseudonymized.replace(badgeSuffixed, w);
+                    });
+
+                    const bracketBase = new RegExp(`\\[${entity.id}_${entity.type}\\]`, 'g');
+                    const badgeBase = new RegExp(`<span class="badge badge-outline">${entity.id}_${entity.type}</span>`, 'g');
+                    pseudonymized = pseudonymized.replace(bracketBase, entity.name);
+                    pseudonymized = pseudonymized.replace(badgeBase, entity.name);
+
+                    if (words.length > 1) {
+                        const badgeSeq = Array(words.length).fill(`<span class="badge badge-outline">${entity.id}_${entity.type}</span>`).join('');
+                        const badgeSeqRegex = new RegExp(badgeSeq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                        pseudonymized = pseudonymized.replace(badgeSeqRegex, entity.name);
+
+                        const bracketSeq = Array(words.length).fill(`[${entity.id}_${entity.type}]`).join('');
+                        const bracketSeqRegex = new RegExp(bracketSeq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                        pseudonymized = pseudonymized.replace(bracketSeqRegex, entity.name);
+                    }
+
+                    return;
+                }
                 
                 // Match patterns like [1_person] or <span class="badge badge-outline">1_person</span>
                 const placeholderPattern = new RegExp(`\\[${entity.id}_${entity.type}\\]`, 'g');
@@ -935,24 +1020,29 @@ export default {
             return pseudonymized;
         },
         detectPlaceholders() {
-            // Find all placeholders in the text using regex pattern [number_type]
+            // Find all placeholders in the text using regex pattern [number_type] and normalize optional suffixes (_a, _b, ...)
             const placeholderRegex = /\[(\d+)_([^\]]+)\]/g;
-            const foundPlaceholders = new Set();
+            const foundPlaceholders = new Map();
             let match;
             
             while ((match = placeholderRegex.exec(this.text)) !== null) {
                 const id = parseInt(match[1]);
-                const type = match[2];
-                foundPlaceholders.add(`${id}_${type}`);
+                const rawType = match[2];
+                const suffixMatch = rawType.match(/^(.*?)(?:_([a-z]))?$/i);
+                const typeBase = suffixMatch ? suffixMatch[1] : rawType;
+                const suffix = suffixMatch && suffixMatch[2] ? suffixMatch[2].toLowerCase() : null;
+                const key = `${id}_${typeBase}`;
+                if (!foundPlaceholders.has(key)) foundPlaceholders.set(key, new Set());
+                if (suffix) foundPlaceholders.get(key).add(suffix);
             }
             
-            // Clear existing entities and create new ones from placeholders
-            this.entities = Array.from(foundPlaceholders).map(placeholder => {
-                const [id, type] = placeholder.split('_');
+            // Clear existing entities and create new ones from placeholders (base types only)
+            this.entities = Array.from(foundPlaceholders.keys()).map(key => {
+                const [idStr, typeBase] = key.split('_');
                 return {
-                    id: parseInt(id),
+                    id: parseInt(idStr),
                     name: '', // Empty name for user to fill in
-                    type: type
+                    type: typeBase
                 };
             }).sort((a, b) => a.id - b.id);
         },
