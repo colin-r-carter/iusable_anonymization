@@ -1,5 +1,5 @@
 > [!WARNING]
-> This project has not been updated for quite some time and has been archived. It is still open source and available for other to build upon. Make sure to update any dependencies etc. There may be a next version some time, but for now this project is not being maintained and therefore marked as archived.
+> This project has been archived and is no longer actively maintained. It remains available as open source for anyone who'd like to build on it — just be sure to update dependencies before use. A future version may come eventually, but there's no timeline for that at present.
 
 
 # Iusable Anonymization and Pseudonymization Tool
