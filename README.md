@@ -1,3 +1,7 @@
+> [!WARNING]
+> This project has not been updated for quite some time and has been archived. It is still open source and available for other to build upon. Make sure to update any dependencies etc. There may be a next version some time, but for now this project is not being maintained and therefore marked as archived.
+
+
 # Iusable Anonymization and Pseudonymization Tool
 
 A Vue 3 application for anonymizing text by detecting and replacing sensitive entities with placeholder tokens.
